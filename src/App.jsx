@@ -6,12 +6,13 @@ import App from './pages/App'
 
 import NotFound from './pages/NotFound'
 
-function App() {
+function AppRouter() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-surface-50 via-surface-100 to-surface-200 dark:from-surface-900 dark:via-surface-800 dark:to-surface-700">
+      <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<App />} />
-
+        <Route path="*" element={<NotFound />} />
       </Routes>
       
       <ToastContainer
@@ -34,4 +35,4 @@ function App() {
   )
 }
 
-export default App
+export default AppRouter
