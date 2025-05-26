@@ -119,9 +119,10 @@ const MainFeature = () => {
       title: '',
       description: '',
       priority: 'medium',
-      category: categories[0]?.name || 'General',
-
+      dueDate: new Date().toISOString().split('T')[0],
+      tags: ''
     })
+
     setShowForm(false)
     setEditingTask(null)
   }
@@ -132,9 +133,10 @@ const MainFeature = () => {
       title: task.title,
       description: task.description,
       priority: task.priority,
-      category: task.category,
-
+      dueDate: task.dueDate.toISOString().split('T')[0],
+      tags: task.tags.join(', ')
     })
+
     setShowForm(true)
   }
 
@@ -174,7 +176,6 @@ const MainFeature = () => {
       }
     })
 
-    })
     .sort((a, b) => {
       switch (sortBy) {
         case 'priority':
