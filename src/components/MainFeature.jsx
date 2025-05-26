@@ -127,7 +127,6 @@ const MainFeature = () => {
     setEditingTask(null)
   }
 
-  }
 
   const handleEdit = (task) => {
     setEditingTask(task)
