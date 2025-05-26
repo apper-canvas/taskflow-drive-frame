@@ -120,11 +120,13 @@ const MainFeature = () => {
       description: '',
       priority: 'medium',
       dueDate: new Date().toISOString().split('T')[0],
+      category: 'General',
       tags: ''
     })
-
     setShowForm(false)
     setEditingTask(null)
+  }
+
   }
 
   const handleEdit = (task) => {
@@ -134,11 +136,12 @@ const MainFeature = () => {
       description: task.description,
       priority: task.priority,
       dueDate: task.dueDate.toISOString().split('T')[0],
+      category: task.category,
       tags: task.tags.join(', ')
     })
-
     setShowForm(true)
   }
+
 
   const handleDelete = (taskId) => {
     setTasks(tasks.filter(task => task.id !== taskId))
