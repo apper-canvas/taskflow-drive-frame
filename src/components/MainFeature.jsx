@@ -2,31 +2,91 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'react-toastify'
 import { format, isToday, isTomorrow, isPast } from 'date-fns'
+import { useSelector } from 'react-redux'
 import ApperIcon from './ApperIcon'
+import taskService from '../services/taskService'
+import categoryService from '../services/categoryService'
 
 const MainFeature = () => {
-  const [tasks, setTasks] = useState([
-    {
-      id: '1',
-      title: 'Design TaskFlow Interface',
-      description: 'Create wireframes and mockups for the new task management interface',
-      completed: false,
-      priority: 'high',
-      dueDate: new Date(),
-      category: 'Design',
-      tags: ['UI/UX', 'Wireframes']
-    },
-    {
-      id: '2',
-      title: 'Write Documentation',
-      description: 'Complete user documentation and API references',
-      completed: true,
-      priority: 'medium',
-      dueDate: new Date(Date.now() - 86400000),
-      category: 'Documentation',
-      tags: ['Writing', 'API']
+  // Authentication check
+  const { user, isAuthenticated } = useSelector((state) => state.user)
+  
+  // State management
+  const [tasks, setTasks] = useState([])
+  const [categories, setCategories] = useState([])
+  const [loading, setLoading] = useState({
+    tasks: false,
+    categories: false,
+    createTask: false,
+    updateTask: false,
+    deleteTask: false,
+    createCategory: false,
+    updateCategory: false,
+    deleteCategory: false
+  })
+  const [error, setError] = useState(null)
+  
+  const [showForm, setShowForm] = useState(false)
+  const [editingTask, setEditingTask] = useState(null)
+  const [filter, setFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('dueDate')
+  const [searchTerm, setSearchTerm] = useState('')
+  
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    priority: 'medium',
+    dueDate: new Date().toISOString().split('T')[0],
+    category: 'General',
+    tags: ''
+  })
+
+  const [showCategoryManager, setShowCategoryManager] = useState(false)
+  const [editingCategory, setEditingCategory] = useState(null)
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [tagFilter, setTagFilter] = useState('')
+  const [newCategoryForm, setNewCategoryForm] = useState({
+    name: '',
+    icon: 'Folder',
+    color: 'bg-gray-100 text-gray-600'
+  })
+
+  // Load initial data
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadTasks()
+      loadCategories()
     }
-  ])
+  }, [isAuthenticated]) // Only re-run when authentication status changes
+
+  const loadTasks = async () => {
+    setLoading(prev => ({ ...prev, tasks: true }))
+    setError(null)
+    try {
+      const fetchedTasks = await taskService.fetchTasks()
+      setTasks(fetchedTasks)
+    } catch (error) {
+      console.error('Failed to load tasks:', error)
+      setError('Failed to load tasks. Please try again.')
+      toast.error('Failed to load tasks')
+    } finally {
+      setLoading(prev => ({ ...prev, tasks: false }))
+    }
+  }
+
+  const loadCategories = async () => {
+    setLoading(prev => ({ ...prev, categories: true }))
+    try {
+      const fetchedCategories = await categoryService.ensureDefaultCategories()
+      setCategories(fetchedCategories)
+    } catch (error) {
+      console.error('Failed to load categories:', error)
+      toast.error('Failed to load categories')
+    } finally {
+      setLoading(prev => ({ ...prev, categories: false }))
+    }
+  }
+
 
   const [showForm, setShowForm] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
@@ -43,22 +103,6 @@ const MainFeature = () => {
     tags: ''
   })
 
-  const [categories, setCategories] = useState([
-    { id: '1', name: 'General', icon: 'Folder', color: 'bg-gray-100 text-gray-600' },
-    { id: '2', name: 'Work', icon: 'Briefcase', color: 'bg-blue-100 text-blue-600' },
-    { id: '3', name: 'Personal', icon: 'User', color: 'bg-green-100 text-green-600' },
-    { id: '4', name: 'Design', icon: 'Palette', color: 'bg-purple-100 text-purple-600' },
-    { id: '5', name: 'Development', icon: 'Code', color: 'bg-indigo-100 text-indigo-600' },
-    { id: '6', name: 'Documentation', icon: 'FileText', color: 'bg-yellow-100 text-yellow-600' }
-  ])
-  const [showCategoryManager, setShowCategoryManager] = useState(false)
-  const [editingCategory, setEditingCategory] = useState(null)
-  const [categoryFilter, setCategoryFilter] = useState('all')
-  const [tagFilter, setTagFilter] = useState('')
-  const [newCategoryForm, setNewCategoryForm] = useState({
-    name: '',
-    icon: 'Folder',
-    color: 'bg-gray-100 text-gray-600'
   })
 
   const availableIcons = [
@@ -82,10 +126,7 @@ const MainFeature = () => {
   const priorities = [
     { value: 'low', label: 'Low', color: 'text-emerald-600', bg: 'bg-emerald-100' },
     { value: 'medium', label: 'Medium', color: 'text-secondary', bg: 'bg-yellow-100' },
-    { value: 'high', label: 'High', color: 'text-red-600', bg: 'bg-red-100' }
-  ]
-
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     
     if (!formData.title.trim()) {
@@ -93,18 +134,100 @@ const MainFeature = () => {
       return
     }
 
-    const taskData = {
-      ...formData,
-      id: editingTask ? editingTask.id : Date.now().toString(),
-      dueDate: new Date(formData.dueDate),
-      tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-      completed: editingTask ? editingTask.completed : false,
-      createdAt: editingTask ? editingTask.createdAt : new Date(),
-      updatedAt: new Date()
-    }
+    const isEditing = !!editingTask
+    setLoading(prev => ({ ...prev, [isEditing ? 'updateTask' : 'createTask']: true }))
+    
+    try {
+      const taskData = {
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        priority: formData.priority,
+        dueDate: formData.dueDate,
+        category: formData.category,
+        tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag),
+        completed: editingTask ? editingTask.completed : false
+      }
 
-    if (editingTask) {
-      setTasks(tasks.map(task => task.id === editingTask.id ? taskData : task))
+      if (isEditing) {
+        const updatedTask = await taskService.updateTask(editingTask.id, taskData)
+        setTasks(tasks.map(task => task.id === editingTask.id ? updatedTask : task))
+        toast.success('Task updated successfully!')
+      } else {
+        const newTask = await taskService.createTask(taskData)
+        setTasks([...tasks, newTask])
+        toast.success('Task created successfully!')
+      }
+
+      resetForm()
+    } catch (error) {
+      console.error('Error saving task:', error)
+      toast.error(isEditing ? 'Failed to update task' : 'Failed to create task')
+    } finally {
+      setLoading(prev => ({ ...prev, [isEditing ? 'updateTask' : 'createTask']: false }))
+    }
+  }
+
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      description: '',
+      priority: 'medium',
+      dueDate: new Date().toISOString().split('T')[0],
+      category: 'General',
+      tags: ''
+    })
+    setShowForm(false)
+    setEditingTask(null)
+  }
+
+    { value: 'high', label: 'High', color: 'text-red-600', bg: 'bg-red-100' }
+  ]
+
+      tags: Array.isArray(task.tags) ? task.tags.join(', ') : ''
+    })
+    setShowForm(true)
+  }
+
+  const handleDelete = async (taskId) => {
+    if (!window.confirm('Are you sure you want to delete this task?')) {
+      return
+    }
+    
+    setLoading(prev => ({ ...prev, deleteTask: true }))
+    try {
+      await taskService.deleteTask(taskId)
+      setTasks(tasks.filter(task => task.id !== taskId))
+      toast.success('Task deleted successfully!')
+    } catch (error) {
+      console.error('Error deleting task:', error)
+      toast.error('Failed to delete task')
+    } finally {
+      setLoading(prev => ({ ...prev, deleteTask: false }))
+    }
+  }
+
+  const toggleComplete = async (taskId) => {
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+    
+    setLoading(prev => ({ ...prev, updateTask: true }))
+    try {
+      const updatedTaskData = {
+        ...task,
+        completed: !task.completed
+      }
+      
+      const updatedTask = await taskService.updateTask(taskId, updatedTaskData)
+      setTasks(tasks.map(t => t.id === taskId ? updatedTask : t))
+      toast.success(task.completed ? 'Task marked as incomplete' : 'Task completed!')
+    } catch (error) {
+      console.error('Error updating task:', error)
+      toast.error('Failed to update task')
+    } finally {
+      setLoading(prev => ({ ...prev, updateTask: false }))
+    }
+  }
+
       toast.success('Task updated successfully!')
     } else {
       setTasks([...tasks, taskData])
@@ -128,24 +251,6 @@ const MainFeature = () => {
   }
 
 
-  const handleEdit = (task) => {
-    setEditingTask(task)
-    setFormData({
-      title: task.title,
-      description: task.description,
-      priority: task.priority,
-      dueDate: task.dueDate.toISOString().split('T')[0],
-      category: task.category,
-      tags: task.tags.join(', ')
-    })
-    setShowForm(true)
-  }
-
-
-  const handleDelete = (taskId) => {
-    setTasks(tasks.filter(task => task.id !== taskId))
-    toast.success('Task deleted successfully!')
-  }
 
   const toggleComplete = (taskId) => {
     setTasks(tasks.map(task => 
@@ -154,6 +259,53 @@ const MainFeature = () => {
         : task
     ))
     const task = tasks.find(t => t.id === taskId)
+  const handleCategorySubmit = async (e) => {
+    e.preventDefault()
+    
+    if (!newCategoryForm.name.trim()) {
+      toast.error('Category name is required')
+      return
+    }
+
+    const isEditing = !!editingCategory
+    setLoading(prev => ({ ...prev, [isEditing ? 'updateCategory' : 'createCategory']: true }))
+    
+    try {
+      const categoryData = {
+        name: newCategoryForm.name.trim(),
+        icon: newCategoryForm.icon,
+        color: newCategoryForm.color
+      }
+
+      if (isEditing) {
+        const updatedCategory = await categoryService.updateCategory(editingCategory.id, categoryData)
+        setCategories(categories.map(cat => cat.id === editingCategory.id ? updatedCategory : cat))
+        toast.success('Category updated successfully!')
+      } else {
+        const newCategory = await categoryService.createCategory(categoryData)
+        setCategories([...categories, newCategory])
+        toast.success('Category created successfully!')
+      }
+
+      resetCategoryForm()
+    } catch (error) {
+      console.error('Error saving category:', error)
+      toast.error(isEditing ? 'Failed to update category' : 'Failed to create category')
+    } finally {
+      setLoading(prev => ({ ...prev, [isEditing ? 'updateCategory' : 'createCategory']: false }))
+    }
+  }
+
+  const resetCategoryForm = () => {
+    setNewCategoryForm({
+      name: '',
+      icon: 'Folder',
+      color: 'bg-gray-100 text-gray-600'
+    })
+    setShowCategoryManager(false)
+    setEditingCategory(null)
+  }
+
     toast.success(task.completed ? 'Task marked as incomplete' : 'Task completed!')
   }
 
@@ -195,6 +347,46 @@ const MainFeature = () => {
     if (isToday(date)) return 'Today'
     if (isTomorrow(date)) return 'Tomorrow'
     if (isPast(date)) return 'Overdue'
+  const handleEditCategory = (category) => {
+    setEditingCategory(category)
+    setNewCategoryForm({
+      name: category.name,
+      icon: category.icon,
+      color: category.color
+    })
+    setShowCategoryManager(true)
+  }
+
+  const handleDeleteCategory = async (categoryId) => {
+    if (!window.confirm('Are you sure you want to delete this category? Tasks using this category will be moved to "General".')) {
+      return
+    }
+    
+    setLoading(prev => ({ ...prev, deleteCategory: true }))
+    try {
+      const categoryToDelete = categories.find(cat => cat.id === categoryId)
+      
+      // Update tasks that use this category
+      const tasksToUpdate = tasks.filter(task => task.category === categoryToDelete?.name)
+      for (const task of tasksToUpdate) {
+        await taskService.updateTask(task.id, { ...task, category: 'General' })
+      }
+      
+      await categoryService.deleteCategory(categoryId)
+      setCategories(categories.filter(cat => cat.id !== categoryId))
+      
+      // Reload tasks to reflect category changes
+      await loadTasks()
+      
+      toast.success('Category deleted successfully!')
+    } catch (error) {
+      console.error('Error deleting category:', error)
+      toast.error('Failed to delete category')
+    } finally {
+      setLoading(prev => ({ ...prev, deleteCategory: false }))
+    }
+  }
+
     return format(date, 'MMM dd')
   }
 
@@ -209,23 +401,36 @@ const MainFeature = () => {
     overdue: tasks.filter(t => !t.completed && isPast(t.dueDate) && !isToday(t.dueDate)).length
   }
 
-  const handleCategorySubmit = (e) => {
-    e.preventDefault()
-    
-    if (!newCategoryForm.name.trim()) {
-      toast.error('Category name is required')
-      return
-    }
+          </div>
+          <p className="text-surface-600 dark:text-surface-400">Loading your tasks...</p>
+        </div>
+      </div>
+    )
+  }
 
-    const categoryData = {
-      ...newCategoryForm,
-      id: editingCategory ? editingCategory.id : Date.now().toString(),
-      name: newCategoryForm.name.trim()
-    }
+  // Show error state if there's an error
+  if (error) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="text-center">
+          <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center shadow-soft mx-auto mb-4">
+            <ApperIcon name="AlertTriangle" className="w-6 h-6 text-red-600" />
+          </div>
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={() => {
+              loadTasks()
+              loadCategories()
+            }}
+            className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
 
-    if (editingCategory) {
-      setCategories(categories.map(cat => cat.id === editingCategory.id ? categoryData : cat))
-      toast.success('Category updated successfully!')
     } else {
       setCategories([...categories, categoryData])
       toast.success('Category created successfully!')
@@ -254,9 +459,7 @@ const MainFeature = () => {
     setShowCategoryManager(true)
   }
 
-  const handleDeleteCategory = (categoryId) => {
-    if (window.confirm('Are you sure you want to delete this category? Tasks using this category will be moved to "General".')) {
-      const categoryToDelete = categories.find(cat => cat.id === categoryId)
+
       
       // Update tasks that use this category
       setTasks(tasks.map(task => 
@@ -280,9 +483,6 @@ const MainFeature = () => {
       task.tags.forEach(tag => allTags.add(tag))
     })
     return Array.from(allTags).sort()
-  }
-
-
   return (
     <div className="px-4 sm:px-6 lg:px-8 pb-12">
       <div className="max-w-6xl mx-auto">
@@ -334,13 +534,6 @@ const MainFeature = () => {
             <h2 className="text-xl sm:text-2xl font-bold text-surface-900 dark:text-white">
               Task Manager
             </h2>
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="flex items-center space-x-2 px-4 py-2 sm:px-6 sm:py-3 bg-gradient-to-r from-primary to-primary-light text-white font-medium rounded-xl hover:from-primary-dark hover:to-primary transition-all duration-200 shadow-soft hover:shadow-card transform hover:-translate-y-0.5"
-            >
-              <ApperIcon name="Plus" className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="text-sm sm:text-base">Add Task</span>
-            </button>
           </div>
 
           {/* Search and Filters */}
@@ -517,6 +710,24 @@ const MainFeature = () => {
                         onChange={(e) => setFormData({...formData, category: e.target.value})}
                         className="flex-1 px-4 py-2 sm:py-3 bg-white/80 dark:bg-surface-700/80 border border-surface-200 dark:border-surface-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-200 text-sm sm:text-base"
                       >
+                  <button
+                    type="submit"
+                    disabled={loading.createTask || loading.updateTask}
+                    className="flex items-center justify-center space-x-2 px-6 py-3 bg-gradient-to-r from-primary to-primary-light text-white font-medium rounded-xl hover:from-primary-dark hover:to-primary transition-all duration-200 shadow-soft hover:shadow-card transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {(loading.createTask || loading.updateTask) ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <ApperIcon name={editingTask ? "Save" : "Plus"} className="w-4 h-4" />
+                    )}
+                    <span>
+                      {loading.createTask || loading.updateTask
+                        ? (editingTask ? 'Updating...' : 'Creating...')
+                        : (editingTask ? 'Update Task' : 'Create Task')
+                      }
+                    </span>
+                  </button>
+
                         {categories.map(category => (
                           <option key={category.id} value={category.name}>
                             {category.name}
@@ -550,13 +761,6 @@ const MainFeature = () => {
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                  <button
-                    type="submit"
-                    className="flex items-center justify-center space-x-2 px-6 py-3 bg-gradient-to-r from-primary to-primary-light text-white font-medium rounded-xl hover:from-primary-dark hover:to-primary transition-all duration-200 shadow-soft hover:shadow-card transform hover:-translate-y-0.5"
-                  >
-                    <ApperIcon name={editingTask ? "Save" : "Plus"} className="w-4 h-4" />
-                    <span>{editingTask ? 'Update Task' : 'Create Task'}</span>
-                  </button>
                   <button
                     type="button"
                     onClick={resetForm}
@@ -647,6 +851,23 @@ const MainFeature = () => {
                             value={newCategoryForm.color}
                             onChange={(e) => setNewCategoryForm({...newCategoryForm, color: e.target.value})}
                             className="w-full px-4 py-2 bg-white dark:bg-surface-700 border border-surface-200 dark:border-surface-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all duration-200"
+                        <button
+                          type="submit"
+                          disabled={loading.createCategory || loading.updateCategory}
+                          className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-primary to-primary-light text-white font-medium rounded-xl hover:from-primary-dark hover:to-primary transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {(loading.createCategory || loading.updateCategory) ? (
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <ApperIcon name={editingCategory ? "Save" : "Plus"} className="w-4 h-4" />
+                          )}
+                          <span>
+                            {loading.createCategory || loading.updateCategory
+                              ? (editingCategory ? 'Updating...' : 'Adding...')
+                              : (editingCategory ? 'Update' : 'Add')} Category
+                          </span>
+                        </button>
+
                           >
                             {availableColors.map(color => (
                               <option key={color} value={color}>
@@ -667,13 +888,6 @@ const MainFeature = () => {
                       </div>
 
                       <div className="flex gap-3">
-                        <button
-                          type="submit"
-                          className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-primary to-primary-light text-white font-medium rounded-xl hover:from-primary-dark hover:to-primary transition-all duration-200"
-                        >
-                          <ApperIcon name={editingCategory ? "Save" : "Plus"} className="w-4 h-4" />
-                          <span>{editingCategory ? 'Update' : 'Add'} Category</span>
-                        </button>
                         {editingCategory && (
                           <button
                             type="button"
@@ -812,6 +1026,27 @@ const MainFeature = () => {
                               {task.category}
                             </span>
                           </div>
+                        <div className="flex items-center gap-1 sm:gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                          <button
+                            onClick={() => handleEdit(task)}
+                            disabled={loading.updateTask}
+                            className="p-1.5 sm:p-2 text-surface-500 hover:text-primary hover:bg-primary/10 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <ApperIcon name="Edit2" className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(task.id)}
+                            disabled={loading.deleteTask}
+                            className="p-1.5 sm:p-2 text-surface-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {loading.deleteTask ? (
+                              <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <ApperIcon name="Trash2" className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            )}
+                          </button>
+                        </div>
+
 
                           {task.tags.length > 0 && (
                             <div className="flex gap-1 flex-wrap">
@@ -829,20 +1064,6 @@ const MainFeature = () => {
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1 sm:gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                          <button
-                            onClick={() => handleEdit(task)}
-                            className="p-1.5 sm:p-2 text-surface-500 hover:text-primary hover:bg-primary/10 rounded-lg transition-all duration-200"
-                          >
-                            <ApperIcon name="Edit2" className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(task.id)}
-                            className="p-1.5 sm:p-2 text-surface-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200"
-                          >
-                            <ApperIcon name="Trash2" className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                          </button>
-                        </div>
                       </div>
                     </div>
                   </div>
